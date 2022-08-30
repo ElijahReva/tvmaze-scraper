@@ -23,7 +23,7 @@
 
     <ItemGroup>
       <ProjectReference Include="..\tvmaze-scraper.api\tvmaze-scraper.api.csproj" />
-      <ProjectReference Include="..\tvmaze-scraper.sync\tvmaze-scraper.sync\tvmaze-scraper.sync.csproj" />
+      <ProjectReference Include="..\tvmaze-scraper.sync\tvmaze-scraper.sync.csproj" />
     </ItemGroup>
 
 </Project>

@@ -53,6 +53,11 @@ public class ShowsController : ControllerBase
             };
         }).ToArray();
 
+        if (result.Length == 0)
+        {
+            return NotFound();
+        }
+        
         return Ok(result);
     }
 }
