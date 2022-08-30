@@ -1,4 +1,4 @@
-﻿namespace tvmaze_scraper.Controllers;
+﻿namespace tvmaze_scraper.common.Contracts;
 
 // Root myDeserializedClass = JsonConvert.DeserializeObject<Root>(myJsonResponse);
     public class Externals

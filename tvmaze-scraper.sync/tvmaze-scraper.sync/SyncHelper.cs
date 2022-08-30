@@ -1,9 +1,11 @@
+using System.Data.Common;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Microsoft.Extensions.Configuration;
 using MongoDB.Driver;
-using tvmaze_scraper.Controllers;
+using Polly;
+using tvmaze_scraper.common.Contracts;
 
 namespace tvmaze_scraper.sync;
 
@@ -22,7 +24,7 @@ public static class SyncHelper
     {
         return client.GetDatabase("tvmaze-scrapper");
     }
-    
+
     // Return p
     public static SyncLock GetLock(this IMongoCollection<SyncLock> collection)
     {
@@ -37,29 +39,35 @@ public static class SyncHelper
                 ReturnDocument = ReturnDocument.Before
             }
         );
-        
+        if (@lock is null)
+        {
+            return new SyncLock()
+            {
+                LastPage = 0,
+                IsRequested = false
+            };
+        }
         return @lock;
     }
-    
-        
+
+
     // Return p
     public static SyncLock ResetPageCount(this IMongoCollection<SyncLock> collection)
     {
         var @lock = collection.FindOneAndUpdate(
             Builders<SyncLock>.Filter.Eq(c => c.Id, 1),
             Builders<SyncLock>.Update
-                .Set(c => c.LastCastPage, 0)
-                .Set(c => c.LastShowPage, 0)
+                .Set(c => c.LastPage, 0)
                 .Set(c => c.IsRequested, true),
             new FindOneAndUpdateOptions<SyncLock>()
             {
                 ReturnDocument = ReturnDocument.After
             }
         );
-        
+
         return @lock;
-    }  
-    
+    }
+
     // Return p
     public static SyncLock Finish(this IMongoCollection<SyncLock> collection)
     {
@@ -72,99 +80,87 @@ public static class SyncHelper
                 ReturnDocument = ReturnDocument.After
             }
         );
-        
+
         return @lock;
-    } 
-    
+    }
+
     // Return p
     public static SyncLock IncShowPage(this IMongoCollection<SyncLock> collection)
     {
         var @lock = collection.FindOneAndUpdate(
             Builders<SyncLock>.Filter.Eq(c => c.Id, 1),
             Builders<SyncLock>.Update
-                .Inc(c => c.LastShowPage, 1),
+                .Inc(c => c.LastPage, 1),
             new FindOneAndUpdateOptions<SyncLock>()
             {
                 ReturnDocument = ReturnDocument.After
             }
         );
-        
-        return @lock;
-    }
-    
-    public static SyncLock IncCastPage(this IMongoCollection<SyncLock> collection)
-    {
-        var @lock = collection.FindOneAndUpdate(
-            Builders<SyncLock>.Filter.Eq(c => c.Id, 1),
-            Builders<SyncLock>.Update
-                .Inc(c => c.LastCastPage, 1),
-            new FindOneAndUpdateOptions<SyncLock>()
-            {
-                ReturnDocument = ReturnDocument.After
-            }
-        );
-        
+
         return @lock;
     }
 
     public static async Task Sync()
     {
-        var configuration =  new ConfigurationBuilder()
+        var configuration = new ConfigurationBuilder()
             .SetBasePath(Directory.GetCurrentDirectory())
             .AddJsonFile($"appsettings.json");
-            
+
         var config = configuration.Build();
         var mongoClient = config.CreateMongoClient();
         var db = mongoClient.GetDatabase();
+        await db.SyncShows();
+    }
+
+    private static async Task SyncShows(
+        this IMongoDatabase db)
+    {
         var lockCollection = db.GetCollection<SyncLock>("syncLock");
         var syncLock = lockCollection.GetLock();
         if (CheckRestart(lockCollection, ref syncLock)) return;
 
+        using var client = Http.CreateClient();
+
         var showCollection = db.GetCollection<Show>("shows");
-        using var client = new HttpClient();
-        client.BaseAddress = new Uri("https://api.tvmaze.com/");
-        client.DefaultRequestHeaders.Accept.Clear();
-        client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-    
-           
-        await SyncShows(client, syncLock, showCollection, lockCollection);
-
-        lockCollection.Finish();
-    }
-
-    private static async Task SyncShows(HttpClient client, SyncLock syncLock, IMongoCollection<Show> showCollection,
-        IMongoCollection<SyncLock> lockCollection)
-    {
-
-        var castTaskList = new List<Task<Cast>>();
-        var response = await client.GetAsync($"shows?page={syncLock.LastShowPage}&embeded=cast");
+        var castCollection = db.GetCollection<Person>("cast");
+        var response = await client.GetWithRetry($"shows?page={syncLock.LastPage}");
         while (response.StatusCode != HttpStatusCode.NotFound)
         {
-            if (response.StatusCode == HttpStatusCode.TooManyRequests)
-            {
-                await Task.Delay(5_000);
-
-                response = await client.GetAsync($"shows?page={syncLock.LastShowPage}");
-                continue;
-            }
-
             if (response.IsSuccessStatusCode)
             {
-                var shows = await response.Content.ReadFromJsonAsync<Show[]>() ?? new Show[] { };
-                // add references to cast or embed cast
-                var writeDocs = shows.Select(s =>
-                {
-                    var f = Builders<Show>.Filter.Eq(s1 => s1.id, s.id);
-                    var replaceOneModel = new ReplaceOneModel<Show>(f, s)
-                    {
-                        IsUpsert = true
-                    };
-                    return replaceOneModel;
-                }).ToList();
-                await showCollection.BulkWriteAsync(writeDocs);
+                var shows = await response.Content.ReadFromJsonAsync<Show[]>() ?? Array.Empty<Show>();
                 foreach (var show in shows)
                 {
-                    Console.WriteLine($"Id:{show.id} \t Name:{show.name}");
+                    var castResponse = await client.GetWithRetry($"shows/{show.id}/cast");
+                    var cast = await castResponse.Content.ReadFromJsonAsync<Cast[]>() ?? Array.Empty<Cast>();
+                    var persons = cast
+                        .Select(c => c.person)
+                        .OrderByDescending(p => p.birthday)
+                        .DistinctBy(p => p.id)
+                        .ToArray();
+                    show.cast = persons.Select(p => p.id).ToArray();
+                    foreach (var person in persons)
+                    {
+                        await castCollection.ReplaceOneAsync(
+                            Builders<Person>.Filter.Eq(s => s.id, person.id),
+                            person,
+                            new ReplaceOptions
+                            {
+                                IsUpsert = true
+                            });
+                        
+                        Console.WriteLine($"Person Id: {person.id} \t Name:{person.name}");
+                    }
+
+                    await showCollection.ReplaceOneAsync(
+                        Builders<Show>.Filter.Eq(s => s.id, show.id),
+                        show,
+                        new ReplaceOptions
+                        {
+                            IsUpsert = true
+                        });
+                    
+                    Console.WriteLine($"Show Id:{show.id} \t Name:{show.name}");
                 }
             }
             else
@@ -172,17 +168,20 @@ public static class SyncHelper
                 Console.WriteLine("Internal server Error\n");
                 var content = await response.Content.ReadAsStringAsync();
                 Console.WriteLine(content);
+                Environment.Exit(-1);
             }
 
             syncLock = lockCollection.IncShowPage();
-            Console.WriteLine($"LAST PAGE -- [{syncLock.LastShowPage}]");
-            response = await client.GetAsync($"shows?page={syncLock.LastShowPage}");
+            Console.WriteLine($"LAST PAGE -- [{syncLock.LastPage}]");
+            response = await client.GetWithRetry($"shows?page={syncLock.LastPage}");
         }
+
+        lockCollection.Finish();
     }
 
     private static bool CheckRestart(IMongoCollection<SyncLock> lockCollection, ref SyncLock syncLock)
     {
-        if (!syncLock.IsRequested && syncLock.LastShowPage > 0 && syncLock.LastCastPage > 0)
+        if (!syncLock.IsRequested && syncLock.LastPage > 0)
         {
             if (Environment.GetCommandLineArgs().Length > 0 && Environment.GetCommandLineArgs()[1] == "-y")
             {
@@ -195,7 +194,7 @@ public static class SyncHelper
             if (input == "Y")
             {
                 syncLock = lockCollection.ResetPageCount();
-                
+
                 return false;
             }
 

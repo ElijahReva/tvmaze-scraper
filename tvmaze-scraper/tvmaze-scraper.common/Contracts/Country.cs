@@ -1,4 +1,4 @@
-﻿namespace tvmaze_scraper.Controllers;
+﻿namespace tvmaze_scraper.common.Contracts;
 
 public class Country
 {

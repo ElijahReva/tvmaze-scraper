@@ -1,4 +1,4 @@
-﻿namespace tvmaze_scraper.Controllers;
+﻿namespace tvmaze_scraper.common.Contracts;
 
 public class Person
 {
@@ -11,5 +11,4 @@ public class Person
     public string gender { get; set; }
     public Image image { get; set; }
     public int updated { get; set; }
-    public Links _links { get; set; }
 }

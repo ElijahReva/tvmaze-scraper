@@ -1,6 +1,6 @@
-﻿namespace tvmaze_scraper.Controllers;
+﻿namespace tvmaze_scraper.common.Contracts;
 
 public class Rating
 {
-    public object average { get; set; }
+    public decimal? average { get; set; }
 }

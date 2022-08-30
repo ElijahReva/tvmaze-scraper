@@ -1,4 +1,4 @@
-﻿namespace tvmaze_scraper.Controllers;
+﻿namespace tvmaze_scraper.common.Contracts;
 
 public class Show
 {
@@ -17,11 +17,12 @@ public class Show
     public Schedule schedule { get; set; }
     public Rating rating { get; set; }
     public int weight { get; set; }
-    public Network network { get; set; }
-    public WebChannel webChannel { get; set; }
-    public object dvdCountry { get; set; }
+    public Network? network { get; set; }
+    public WebChannel? webChannel { get; set; }
+    public object? dvdCountry { get; set; }
     public Externals externals { get; set; }
     public Image image { get; set; }
     public string summary { get; set; }
     public int updated { get; set; }
+    public int[] cast;
 }

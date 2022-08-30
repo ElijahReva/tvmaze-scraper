@@ -26,16 +26,6 @@ public static class StartupExt
     }
     public static WebApplicationBuilder AddDataAccess(this WebApplicationBuilder builder)
     {
-        // Set up MongoDB conventions
-        var pack = new ConventionPack
-        {
-            new EnumRepresentationConvention(BsonType.String),
-            new GuidAsStringRepresentationConvention()
-        };
-
-        ConventionRegistry.Register("EnumAndGuid", pack, t => true);
-
-
         IMongoClient ImplementationFactory(IServiceProvider s)
         {
             var connectionString = builder.Configuration.GetConnectionString("MongoDb");

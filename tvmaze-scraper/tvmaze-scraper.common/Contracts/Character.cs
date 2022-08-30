@@ -1,4 +1,4 @@
-﻿namespace tvmaze_scraper.Controllers;
+﻿namespace tvmaze_scraper.common.Contracts;
 
 // Root myDeserializedClass = JsonConvert.DeserializeObject<Root>(myJsonResponse);
 public class Character
@@ -7,5 +7,4 @@ public class Character
     public string url { get; set; }
     public string name { get; set; }
     public object image { get; set; }
-    public Links _links { get; set; }
 }
