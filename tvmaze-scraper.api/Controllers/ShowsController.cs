@@ -1,32 +1,27 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
 using MongoDB.Driver;
 using tvmaze_scraper.common.Contracts;
 
-namespace tvmaze_scraper.Controllers;
+namespace tvmaze_scraper.api.Controllers;
 
 [ApiController]
 [Route("[controller]")]
 public class ShowsController : ControllerBase
 {
-    private readonly ILogger<ShowsController> _logger;
     private readonly IMongoDatabase db;
 
-    public ShowsController(ILogger<ShowsController> logger, IMongoDatabase db)
+    public ShowsController(IMongoDatabase db)
     {
-        _logger = logger;
         this.db = db;
     }
 
     [HttpGet]
     [Route("list")]
-    public async Task<IActionResult> List([FromQuery] int page = 1)
+    public async Task<IActionResult> List([FromQuery] int page = 1, [FromQuery] int pageSize = 50)
     {
         var showCollection = db.GetCollection<Show>("shows");
         var castCollection = db.GetCollection<Person>("cast");
         
-        int pageSize = 50;
         var filter = Builders<Show>.Filter.Empty;
 
         var data = await showCollection.Find(filter)
