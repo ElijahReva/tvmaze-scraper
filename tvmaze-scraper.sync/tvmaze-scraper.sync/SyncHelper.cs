@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Data.Common;
 using System.Net;
 using System.Net.Http.Headers;
@@ -120,7 +121,7 @@ public static class SyncHelper
         if (CheckRestart(lockCollection, ref syncLock)) return;
 
         using var client = Http.CreateClient();
-
+        var cache = new ConcurrentDictionary<int, int>();
         var showCollection = db.GetCollection<Show>("shows");
         var castCollection = db.GetCollection<Person>("cast");
         var response = await client.GetWithRetry($"shows?page={syncLock.LastPage}");
@@ -129,39 +130,10 @@ public static class SyncHelper
             if (response.IsSuccessStatusCode)
             {
                 var shows = await response.Content.ReadFromJsonAsync<Show[]>() ?? Array.Empty<Show>();
-                foreach (var show in shows)
-                {
-                    var castResponse = await client.GetWithRetry($"shows/{show.id}/cast");
-                    var cast = await castResponse.Content.ReadFromJsonAsync<Cast[]>() ?? Array.Empty<Cast>();
-                    var persons = cast
-                        .Select(c => c.person)
-                        .OrderByDescending(p => p.birthday)
-                        .DistinctBy(p => p.id)
-                        .ToArray();
-                    show.cast = persons.Select(p => p.id).ToArray();
-                    foreach (var person in persons)
-                    {
-                        await castCollection.ReplaceOneAsync(
-                            Builders<Person>.Filter.Eq(s => s.id, person.id),
-                            person,
-                            new ReplaceOptions
-                            {
-                                IsUpsert = true
-                            });
-                        
-                        Console.WriteLine($"Person Id: {person.id} \t Name:{person.name}");
-                    }
-
-                    await showCollection.ReplaceOneAsync(
-                        Builders<Show>.Filter.Eq(s => s.id, show.id),
-                        show,
-                        new ReplaceOptions
-                        {
-                            IsUpsert = true
-                        });
-                    
-                    Console.WriteLine($"Show Id:{show.id} \t Name:{show.name}");
-                }
+                var showTasks = shows
+                    .Select(s => s.ProcessShow(client, cache, castCollection, showCollection))
+                    .ToArray();
+                await Task.WhenAll(showTasks);
             }
             else
             {
@@ -177,6 +149,46 @@ public static class SyncHelper
         }
 
         lockCollection.Finish();
+    }
+
+    private static async Task ProcessShow(
+        this Show show,
+        HttpClient client,
+        ConcurrentDictionary<int, int> cache,
+        IMongoCollection<Person> castCollection,
+        IMongoCollection<Show> showCollection)
+    {
+        var castResponse = await client.GetWithRetry($"shows/{show.id}/cast");
+        var cast = await castResponse.Content.ReadFromJsonAsync<Cast[]>() ?? Array.Empty<Cast>();
+        var persons = cast
+            .Select(c => c.person)
+            .OrderByDescending(p => p.birthday)
+            .DistinctBy(p => p.id)
+            .ToArray();
+        show.cast = persons.Select(p => p.id).ToArray();
+        foreach (var person in persons)
+        {
+            if (cache.ContainsKey(person.id)) continue;
+            await castCollection.ReplaceOneAsync(
+                Builders<Person>.Filter.Eq(s => s.id, person.id),
+                person,
+                new ReplaceOptions
+                {
+                    IsUpsert = true
+                });
+            cache.TryAdd(person.id, person.id);
+            Console.WriteLine($"Person Id: {person.id} \t Name:{person.name}");
+        }
+
+        await showCollection.ReplaceOneAsync(
+            Builders<Show>.Filter.Eq(s => s.id, show.id),
+            show,
+            new ReplaceOptions
+            {
+                IsUpsert = true
+            });
+
+        Console.WriteLine($"Show Id:{show.id} \t Name:{show.name}");
     }
 
     private static bool CheckRestart(IMongoCollection<SyncLock> lockCollection, ref SyncLock syncLock)
