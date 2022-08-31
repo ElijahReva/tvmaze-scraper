@@ -93,6 +93,7 @@ public static class SyncHelper
                 {
                     IsUpsert = true
                 });
+
             cache.TryAdd(person.id, person.id);
             Console.WriteLine($"Person Id: {person.id} \t Name:{person.name}");
         }

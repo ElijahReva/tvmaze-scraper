@@ -1,3 +1,4 @@
+using System.Net;
 using Microsoft.AspNetCore.Mvc;
 using MongoDB.Driver;
 using tvmaze_scraper.common.Contracts;
@@ -9,27 +10,35 @@ namespace tvmaze_scraper.api.Controllers;
 public class ShowsController : ControllerBase
 {
     private readonly IMongoDatabase db;
+    private readonly IMongoCollection<Show> showCollection;
+    private readonly IMongoCollection<Person> castCollection;
 
-    public ShowsController(IMongoDatabase db)
+    public ShowsController(IMongoDatabase db, IMongoCollection<Show> showCollection, IMongoCollection<Person> castCollection)
     {
         this.db = db;
+        this.showCollection = showCollection;
+        this.castCollection = castCollection;
     }
 
     [HttpGet]
     [Route("list")]
+    [ProducesResponseType(typeof(void), (int)HttpStatusCode.NotFound)]
+    [ProducesResponseType(typeof(ShowViewModel[]), (int)HttpStatusCode.OK)]
     public async Task<IActionResult> List([FromQuery] int page = 1, [FromQuery] int pageSize = 50)
     {
-        var showCollection = db.GetCollection<Show>("shows");
-        var castCollection = db.GetCollection<Person>("cast");
-        
         var filter = Builders<Show>.Filter.Empty;
 
-        var data = await showCollection.Find(filter)
+        var shows = await showCollection.Find(filter)
             .Skip((page - 1) * pageSize)
             .Limit(pageSize)
             .ToListAsync();
+        
+        if (shows.Count == 0)
+        {
+            return NotFound();
+        }
 
-        var castRequest = data.SelectMany(c => c.cast).Distinct().ToArray();
+        var castRequest = shows.SelectMany(c => c.cast).Distinct().ToArray();
 
         var personFilter = Builders<Person>.Filter.In(x => x.id, castRequest);
         var proj = Builders<Person>.Projection.Expression(p => new CastViewModel
@@ -43,7 +52,7 @@ public class ShowsController : ControllerBase
             .Project(proj)
             .ToListAsync();
 
-        var result = data.Select(s =>
+        var result = shows.Select(s =>
         {
             return new ShowViewModel
             {
@@ -53,11 +62,7 @@ public class ShowsController : ControllerBase
             };
         }).ToArray();
 
-        if (result.Length == 0)
-        {
-            return NotFound();
-        }
-        
+
         return Ok(result);
     }
 }

@@ -10,7 +10,6 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using MongoDB.Driver;
-using tvmaze_scraper.api.Controllers;
 using tvmaze_scraper.common.Contracts;
 using tvmaze_scraper.sync;
 using Xunit;
